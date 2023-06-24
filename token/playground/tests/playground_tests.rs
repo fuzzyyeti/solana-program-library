@@ -1,4 +1,5 @@
 use std::alloc::System;
+use std::cmp::min;
 use solana_program::bpf_loader_upgradeable::UpgradeableLoaderState::Buffer;
 use solana_program::program_option::COption;
 use solana_program::pubkey::Pubkey;
@@ -16,6 +17,8 @@ use {
 use solana_sdk::signature::{Keypair, Signer};
 use spl_token_2022::extension::ExtensionType;
 use spl_token_2022::state::Mint;
+use spl_associated_token_account::{instruction::create_associated_token_account, get_associated_token_address};
+
 
 #[tokio::test]
 async fn playground_test() {
@@ -49,6 +52,10 @@ async fn playground_test() {
     program_test.add_program("spl-token-2022",
     spl_token_2022::ID,
     processor!(spl_token_2022::processor::Processor::process));
+
+    program_test.add_program("spl-associated-token-account",
+    spl_associated_token_account::ID,
+    processor!(spl_associated_token_account::processor::process_instruction));
 
     program_test.add_account(
         extra_accounts_address,
@@ -94,5 +101,41 @@ async fn playground_test() {
     println!("derived PDA {}",extra_accounts_address.to_string());
 
     //Try to mint some tokens
+    //
+    let alice = Keypair::new();
+    let bob = Pubkey::new_unique();
+    let alice_ata =  get_associated_token_address(
+       &alice.pubkey(),
+        &mint.pubkey(),
+    );
+    println!("ata {}", alice_ata.to_string());
 
+    let alice_create_ata_ix = create_associated_token_account(
+        &payer.pubkey(),
+        &alice.pubkey(),
+        &mint.pubkey(),
+        &spl_token_2022::ID,
+    );
+
+    let mint_tokens_ix = mint_to(
+        &spl_token_2022::ID,
+        &mint.pubkey(),
+        &alice_ata,
+        &alice.pubkey(),
+        &[&payer.pubkey()],
+        100).unwrap();
+    //
+    //
+        let mut mint_tokens_tx = Transaction::new_with_payer(
+            &[alice_create_ata_ix],
+            Some(&payer.pubkey()),
+        );
+
+        mint_tokens_tx.sign(&[&payer], recent_blockhash);
+
+        let result = banks_client.process_transaction(mint_tokens_tx).await;
+        match result {
+            Ok(()) => println!("Token Mint Transaction succeeded"),
+            Err(e) => eprintln!("Token Mint Transaction failed: {:?}", e),
+        };
 }
