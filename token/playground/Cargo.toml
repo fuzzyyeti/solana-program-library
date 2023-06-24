@@ -1,0 +1,20 @@
+[package]
+name = "playground"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+solana-program = "=1.14.12"
+solana-program-test = "=1.14.12"
+solana-sdk = "=1.14.12"
+spl-associated-token-account = { version = "1.1", path = "../../associated-token-account/program" }
+spl-memo = { version = "3.0.1", path = "../../memo/program", features = ["no-entrypoint"] }
+spl-token-2022 = { version = "0.6", path="../program-2022", features = ["no-entrypoint"] }
+spl-transfer-hook-example = { version = "0.1", path="../transfer-hook-example", features = ["no-entrypoint"] }
+spl-transfer-hook-interface = { version = "0.1", path="../transfer-hook-interface" }
+
+
+[dev-dependencies]
+tokio = "1.14.1"

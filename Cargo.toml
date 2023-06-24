@@ -52,6 +52,7 @@ members = [
   "token/transfer-hook-example",
   "token/transfer-hook-interface",
   "token/client",
+	"token/playground",
   "utils/cgen",
   "utils/test-client",
   "token-lending/flash_loan_receiver",
