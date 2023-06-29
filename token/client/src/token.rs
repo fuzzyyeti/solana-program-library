@@ -21,8 +21,8 @@ use {
     spl_token_2022::{
         extension::{
             confidential_transfer, cpi_guard, default_account_state, interest_bearing_mint,
-            memo_transfer, transfer_fee, transfer_hook, BaseStateWithExtensions, ExtensionType,
-            StateWithExtensionsOwned,
+            memo_transfer, metadata_pointer, transfer_fee, transfer_hook, BaseStateWithExtensions,
+            ExtensionType, StateWithExtensionsOwned,
         },
         instruction, offchain,
         pod::EncryptionPubkey,
@@ -137,6 +137,10 @@ pub enum ExtensionInitializationParams {
         authority: Option<Pubkey>,
         program_id: Option<Pubkey>,
     },
+    MetadataPointer {
+        authority: Option<Pubkey>,
+        metadata_address: Option<Pubkey>,
+    },
 }
 impl ExtensionInitializationParams {
     /// Get the extension type associated with the init params
@@ -150,6 +154,7 @@ impl ExtensionInitializationParams {
             Self::NonTransferable => ExtensionType::NonTransferable,
             Self::PermanentDelegate { .. } => ExtensionType::PermanentDelegate,
             Self::TransferHook { .. } => ExtensionType::TransferHook,
+            Self::MetadataPointer { .. } => ExtensionType::MetadataPointer,
         }
     }
     /// Generate an appropriate initialization instruction for the given mint
@@ -220,6 +225,15 @@ impl ExtensionInitializationParams {
                 mint,
                 authority,
                 program_id,
+            ),
+            Self::MetadataPointer {
+                authority,
+                metadata_address,
+            } => metadata_pointer::instruction::initialize(
+                token_program_id,
+                mint,
+                authority,
+                metadata_address,
             ),
         }
     }
@@ -406,9 +420,9 @@ where
         ))))
     }
 
-    fn get_multisig_signers<'a, 'b>(
+    fn get_multisig_signers<'a>(
         &self,
-        authority: &'b Pubkey,
+        authority: &Pubkey,
         signing_pubkeys: &'a [Pubkey],
     ) -> Vec<&'a Pubkey> {
         if signing_pubkeys == [*authority] {
@@ -517,7 +531,7 @@ where
             .iter()
             .map(|e| e.extension())
             .collect::<Vec<_>>();
-        let space = ExtensionType::get_account_len::<Mint>(&extension_types);
+        let space = ExtensionType::try_get_account_len::<Mint>(&extension_types)?;
 
         let mut instructions = vec![system_instruction::create_account(
             &self.payer.pubkey(),
@@ -639,7 +653,7 @@ where
                 required_extensions.push(extension_type);
             }
         }
-        let space = ExtensionType::get_account_len::<Account>(&required_extensions);
+        let space = ExtensionType::try_get_account_len::<Account>(&required_extensions)?;
         let mut instructions = vec![system_instruction::create_account(
             &self.payer.pubkey(),
             &account.pubkey(),
@@ -1245,7 +1259,7 @@ where
             } else {
                 vec![]
             };
-            let space = ExtensionType::get_account_len::<Account>(&extensions);
+            let space = ExtensionType::try_get_account_len::<Account>(&extensions)?;
 
             instructions.push(system_instruction::create_account(
                 &self.payer.pubkey(),
@@ -1553,6 +1567,29 @@ where
                 authority,
                 &multisig_signers,
                 new_program_id,
+            )?],
+            signing_keypairs,
+        )
+        .await
+    }
+
+    /// Update metadata pointer address
+    pub async fn update_metadata_address<S: Signers>(
+        &self,
+        authority: &Pubkey,
+        new_metadata_address: Option<Pubkey>,
+        signing_keypairs: &S,
+    ) -> TokenResult<T::Output> {
+        let signing_pubkeys = signing_keypairs.pubkeys();
+        let multisig_signers = self.get_multisig_signers(authority, &signing_pubkeys);
+
+        self.process_ixs(
+            &[metadata_pointer::instruction::update(
+                &self.program_id,
+                self.get_address(),
+                authority,
+                &multisig_signers,
+                new_metadata_address,
             )?],
             signing_keypairs,
         )

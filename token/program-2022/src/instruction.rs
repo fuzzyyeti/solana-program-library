@@ -657,6 +657,12 @@ pub enum TokenInstruction<'a> {
     /// 2. `[signer]` Authority
     /// 3. ..2+M `[signer]` M signer accounts.
     WithdrawExcessLamports,
+    /// The common instruction prefix for metadata pointer extension instructions.
+    ///
+    /// See `extension::metadata_pointer::instruction::MetadataPointerInstruction`
+    /// for further details about the extended instructions that share this instruction
+    /// prefix
+    MetadataPointerExtension,
 }
 impl<'a> TokenInstruction<'a> {
     /// Unpacks a byte buffer into a [TokenInstruction](enum.TokenInstruction.html).
@@ -677,7 +683,7 @@ impl<'a> TokenInstruction<'a> {
             }
             1 => Self::InitializeAccount,
             2 => {
-                let &m = rest.get(0).ok_or(InvalidInstruction)?;
+                let &m = rest.first().ok_or(InvalidInstruction)?;
                 Self::InitializeMultisig { m }
             }
             3 | 4 | 7 | 8 => {
@@ -737,7 +743,7 @@ impl<'a> TokenInstruction<'a> {
                 Self::InitializeAccount3 { owner }
             }
             19 => {
-                let &m = rest.get(0).ok_or(InvalidInstruction)?;
+                let &m = rest.first().ok_or(InvalidInstruction)?;
                 Self::InitializeMultisig2 { m }
             }
             20 => {
@@ -795,6 +801,7 @@ impl<'a> TokenInstruction<'a> {
             36 => Self::TransferHookExtension,
             37 => Self::ConfidentialTransferFeeExtension,
             38 => Self::WithdrawExcessLamports,
+            39 => Self::MetadataPointerExtension,
             _ => return Err(TokenError::InvalidInstruction.into()),
         })
     }
@@ -892,9 +899,7 @@ impl<'a> TokenInstruction<'a> {
                 buf.extend_from_slice(mint_authority.as_ref());
                 Self::pack_pubkey_option(freeze_authority, &mut buf);
             }
-            &Self::GetAccountDataSize {
-                ref extension_types,
-            } => {
+            Self::GetAccountDataSize { extension_types } => {
                 buf.push(21);
                 for extension_type in extension_types {
                     buf.extend_from_slice(&<[u8; 2]>::from(*extension_type));
@@ -911,13 +916,11 @@ impl<'a> TokenInstruction<'a> {
                 buf.push(24);
                 buf.extend_from_slice(ui_amount.as_bytes());
             }
-            &Self::InitializeMintCloseAuthority {
-                ref close_authority,
-            } => {
+            Self::InitializeMintCloseAuthority { close_authority } => {
                 buf.push(25);
                 Self::pack_pubkey_option(close_authority, &mut buf);
             }
-            &Self::TransferFeeExtension(ref instruction) => {
+            Self::TransferFeeExtension(instruction) => {
                 buf.push(26);
                 TransferFeeInstruction::pack(instruction, &mut buf);
             }
@@ -927,9 +930,7 @@ impl<'a> TokenInstruction<'a> {
             &Self::DefaultAccountStateExtension => {
                 buf.push(28);
             }
-            &Self::Reallocate {
-                ref extension_types,
-            } => {
+            Self::Reallocate { extension_types } => {
                 buf.push(29);
                 for extension_type in extension_types {
                     buf.extend_from_slice(&<[u8; 2]>::from(*extension_type));
@@ -950,7 +951,7 @@ impl<'a> TokenInstruction<'a> {
             &Self::CpiGuardExtension => {
                 buf.push(34);
             }
-            &Self::InitializePermanentDelegate { ref delegate } => {
+            Self::InitializePermanentDelegate { delegate } => {
                 buf.push(35);
                 buf.extend_from_slice(delegate.as_ref());
             }
@@ -963,6 +964,9 @@ impl<'a> TokenInstruction<'a> {
             &Self::WithdrawExcessLamports => {
                 buf.push(38);
             }
+            &Self::MetadataPointerExtension => {
+                buf.push(39);
+            }
         };
         buf
     }
@@ -970,7 +974,7 @@ impl<'a> TokenInstruction<'a> {
     pub(crate) fn unpack_pubkey(input: &[u8]) -> Result<(Pubkey, &[u8]), ProgramError> {
         let pk = input
             .get(..PUBKEY_BYTES)
-            .map(Pubkey::new)
+            .and_then(|x| Pubkey::try_from(x).ok())
             .ok_or(TokenError::InvalidInstruction)?;
         Ok((pk, &input[PUBKEY_BYTES..]))
     }
@@ -1053,6 +1057,8 @@ pub enum AuthorityType {
     TransferHookProgramId,
     /// Authority to set the withdraw withheld authority encryption key
     ConfidentialTransferFeeConfig,
+    /// Authority to set the metadata address
+    MetadataPointer,
 }
 
 impl AuthorityType {
@@ -1070,6 +1076,7 @@ impl AuthorityType {
             AuthorityType::ConfidentialTransferMint => 9,
             AuthorityType::TransferHookProgramId => 10,
             AuthorityType::ConfidentialTransferFeeConfig => 11,
+            AuthorityType::MetadataPointer => 12,
         }
     }
 
@@ -1087,6 +1094,7 @@ impl AuthorityType {
             9 => Ok(AuthorityType::ConfidentialTransferMint),
             10 => Ok(AuthorityType::TransferHookProgramId),
             11 => Ok(AuthorityType::ConfidentialTransferFeeConfig),
+            12 => Ok(AuthorityType::MetadataPointer),
             _ => Err(TokenError::InvalidInstruction.into()),
         }
     }
@@ -1940,7 +1948,7 @@ mod test {
     fn test_instruction_packing() {
         let check = TokenInstruction::InitializeMint {
             decimals: 2,
-            mint_authority: Pubkey::new(&[1u8; 32]),
+            mint_authority: Pubkey::new_from_array([1u8; 32]),
             freeze_authority: COption::None,
         };
         let packed = check.pack();
@@ -1953,8 +1961,8 @@ mod test {
 
         let check = TokenInstruction::InitializeMint {
             decimals: 2,
-            mint_authority: Pubkey::new(&[2u8; 32]),
-            freeze_authority: COption::Some(Pubkey::new(&[3u8; 32])),
+            mint_authority: Pubkey::new_from_array([2u8; 32]),
+            freeze_authority: COption::Some(Pubkey::new_from_array([3u8; 32])),
         };
         let packed = check.pack();
         let mut expect = vec![0u8, 2];
@@ -2003,7 +2011,7 @@ mod test {
 
         let check = TokenInstruction::SetAuthority {
             authority_type: AuthorityType::FreezeAccount,
-            new_authority: COption::Some(Pubkey::new(&[4u8; 32])),
+            new_authority: COption::Some(Pubkey::new_from_array([4u8; 32])),
         };
         let packed = check.pack();
         let mut expect = Vec::from([6u8, 1]);
@@ -2089,7 +2097,7 @@ mod test {
         assert_eq!(unpacked, check);
 
         let check = TokenInstruction::InitializeAccount2 {
-            owner: Pubkey::new(&[2u8; 32]),
+            owner: Pubkey::new_from_array([2u8; 32]),
         };
         let packed = check.pack();
         let mut expect = vec![16u8];
@@ -2106,7 +2114,7 @@ mod test {
         assert_eq!(unpacked, check);
 
         let check = TokenInstruction::InitializeAccount3 {
-            owner: Pubkey::new(&[2u8; 32]),
+            owner: Pubkey::new_from_array([2u8; 32]),
         };
         let packed = check.pack();
         let mut expect = vec![18u8];
@@ -2124,7 +2132,7 @@ mod test {
 
         let check = TokenInstruction::InitializeMint2 {
             decimals: 2,
-            mint_authority: Pubkey::new(&[1u8; 32]),
+            mint_authority: Pubkey::new_from_array([1u8; 32]),
             freeze_authority: COption::None,
         };
         let packed = check.pack();
@@ -2137,8 +2145,8 @@ mod test {
 
         let check = TokenInstruction::InitializeMint2 {
             decimals: 2,
-            mint_authority: Pubkey::new(&[2u8; 32]),
-            freeze_authority: COption::Some(Pubkey::new(&[3u8; 32])),
+            mint_authority: Pubkey::new_from_array([2u8; 32]),
+            freeze_authority: COption::Some(Pubkey::new_from_array([3u8; 32])),
         };
         let packed = check.pack();
         let mut expect = vec![20u8, 2];
@@ -2185,7 +2193,7 @@ mod test {
         assert_eq!(unpacked, check);
 
         let check = TokenInstruction::InitializeMintCloseAuthority {
-            close_authority: COption::Some(Pubkey::new(&[10u8; 32])),
+            close_authority: COption::Some(Pubkey::new_from_array([10u8; 32])),
         };
         let packed = check.pack();
         let mut expect = vec![25u8, 1];
@@ -2202,7 +2210,7 @@ mod test {
         assert_eq!(unpacked, check);
 
         let check = TokenInstruction::InitializePermanentDelegate {
-            delegate: Pubkey::new(&[11u8; 32]),
+            delegate: Pubkey::new_from_array([11u8; 32]),
         };
         let packed = check.pack();
         let mut expect = vec![35u8];

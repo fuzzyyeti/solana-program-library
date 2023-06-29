@@ -43,6 +43,7 @@ use spl_token_2022::{
         default_account_state::DefaultAccountState,
         interest_bearing_mint::InterestBearingConfig,
         memo_transfer::MemoTransfer,
+        metadata_pointer::MetadataPointer,
         mint_close_authority::MintCloseAuthority,
         permanent_delegate::PermanentDelegate,
         transfer_fee::{TransferFeeAmount, TransferFeeConfig},
@@ -783,6 +784,7 @@ async fn command_authorize(
         AuthorityType::ConfidentialTransferFeeConfig => {
             "confidential transfer fee config authority"
         }
+        AuthorityType::MetadataPointer => "metadata pointer authority",
     };
 
     let (mint_pubkey, previous_authority) = if !config.sign_only {
@@ -884,6 +886,16 @@ async fn command_authorize(
                         ))
                     }
                 }
+                AuthorityType::MetadataPointer => {
+                    if let Ok(extension) = mint.get_extension::<MetadataPointer>() {
+                        Ok(COption::<Pubkey>::from(extension.authority))
+                    } else {
+                        Err(format!(
+                            "Mint `{}` does not support a metadata pointer",
+                            account
+                        ))
+                    }
+                }
             }?;
 
             Ok((account, previous_authority))
@@ -920,7 +932,8 @@ async fn command_authorize(
                 | AuthorityType::PermanentDelegate
                 | AuthorityType::ConfidentialTransferMint
                 | AuthorityType::TransferHookProgramId
-                | AuthorityType::ConfidentialTransferFeeConfig => Err(format!(
+                | AuthorityType::ConfidentialTransferFeeConfig
+                | AuthorityType::MetadataPointer => Err(format!(
                     "Authority type `{}` not supported for SPL Token accounts",
                     auth_str
                 )),
@@ -2173,7 +2186,8 @@ async fn command_required_transfer_memos(
         }
     } else {
         existing_extensions.push(ExtensionType::MemoTransfer);
-        let needed_account_len = ExtensionType::get_account_len::<Account>(&existing_extensions);
+        let needed_account_len =
+            ExtensionType::try_get_account_len::<Account>(&existing_extensions)?;
         if needed_account_len > current_account_len {
             token
                 .reallocate(
@@ -2245,7 +2259,8 @@ async fn command_cpi_guard(
         }
     } else {
         existing_extensions.push(ExtensionType::CpiGuard);
-        let required_account_len = ExtensionType::get_account_len::<Account>(&existing_extensions);
+        let required_account_len =
+            ExtensionType::try_get_account_len::<Account>(&existing_extensions)?;
         if required_account_len > current_account_len {
             token
                 .reallocate(
@@ -3884,6 +3899,8 @@ async fn process_command<'a>(
                 "permanent-delegate" => AuthorityType::PermanentDelegate,
                 "confidential-transfer-mint" => AuthorityType::ConfidentialTransferMint,
                 "transfer-hook-program-id" => AuthorityType::TransferHookProgramId,
+                "confidential-transfer-fee" => AuthorityType::ConfidentialTransferFeeConfig,
+                "metadata-pointer" => AuthorityType::MetadataPointer,
                 _ => unreachable!(),
             };
 
@@ -4369,7 +4386,6 @@ async fn process_command<'a>(
             let source_accounts = arg_matches
                 .values_of("source")
                 .unwrap_or_default()
-                .into_iter()
                 .map(|s| Pubkey::from_str(s).unwrap_or_else(print_error_and_exit))
                 .collect::<Vec<_>>();
             command_withdraw_withheld_tokens(
@@ -4479,14 +4495,14 @@ mod tests {
         super::*,
         serial_test::serial,
         solana_sdk::{
-            bpf_loader,
+            bpf_loader_upgradeable,
             hash::Hash,
             program_pack::Pack,
             signature::{write_keypair_file, Keypair, Signer},
             system_instruction,
             transaction::Transaction,
         },
-        solana_test_validator::{ProgramInfo, TestValidator, TestValidatorGenesis},
+        solana_test_validator::{TestValidator, TestValidatorGenesis, UpgradeableProgramInfo},
         spl_token_2022::{extension::non_transferable::NonTransferable, state::Multisig},
         spl_token_client::client::{
             ProgramClient, ProgramOfflineClient, ProgramRpcClient, ProgramRpcClientSendTransaction,
@@ -4504,21 +4520,24 @@ mod tests {
     async fn new_validator_for_test() -> (TestValidator, Keypair) {
         solana_logger::setup();
         let mut test_validator_genesis = TestValidatorGenesis::default();
-        test_validator_genesis.add_programs_with_path(&[
-            ProgramInfo {
+        test_validator_genesis.add_upgradeable_programs_with_path(&[
+            UpgradeableProgramInfo {
                 program_id: spl_token::id(),
-                loader: bpf_loader::id(),
+                loader: bpf_loader_upgradeable::id(),
                 program_path: PathBuf::from("../../target/deploy/spl_token.so"),
+                upgrade_authority: Pubkey::new_unique(),
             },
-            ProgramInfo {
+            UpgradeableProgramInfo {
                 program_id: spl_associated_token_account::id(),
-                loader: bpf_loader::id(),
+                loader: bpf_loader_upgradeable::id(),
                 program_path: PathBuf::from("../../target/deploy/spl_associated_token_account.so"),
+                upgrade_authority: Pubkey::new_unique(),
             },
-            ProgramInfo {
+            UpgradeableProgramInfo {
                 program_id: spl_token_2022::id(),
-                loader: bpf_loader::id(),
+                loader: bpf_loader_upgradeable::id(),
                 program_path: PathBuf::from("../../target/deploy/spl_token_2022.so"),
+                upgrade_authority: Pubkey::new_unique(),
             },
         ]);
         test_validator_genesis.start_async().await
