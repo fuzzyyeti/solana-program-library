@@ -12,7 +12,7 @@ use {
     spl_transfer_hook_example::state::example_data,
     spl_transfer_hook_interface::get_extra_account_metas_address,
     spl_token_2022::extension::transfer_hook::instruction::initialize,
-    spl_token_2022::instruction::initialize_mint,
+    spl_token_2022::instruction::initialize_mint2,
     spl_token_2022::instruction::mint_to,
 };
 use solana_sdk::signature::{Keypair, Signer};
@@ -78,7 +78,15 @@ async fn create_transfer_hook_ata() {
         &spl_token_2022::ID, // Allocate to the same program ID
     );
 
-    let ix = initialize(
+    let ix = initialize_mint2(
+        &spl_token_2022::ID,
+        &mint.pubkey(),
+        &payer.pubkey(),
+        Some(&payer.pubkey()),
+        9,
+    ).unwrap();
+
+    let transfer_hook_init_ix = initialize(
         &spl_token_2022::ID,
         &mint.pubkey(),
         Some(payer.pubkey()),
@@ -87,7 +95,7 @@ async fn create_transfer_hook_ata() {
 
 
     let mut tx = Transaction::new_signed_with_payer(
-        &[create_account_instruction, ix],
+        &[create_account_instruction, transfer_hook_init_ix],
         Some(&payer.pubkey()),
         &[&mint, &payer],
         recent_blockhash,
@@ -97,6 +105,19 @@ async fn create_transfer_hook_ata() {
         Ok(()) => println!("Transaction succeeded"),
         Err(e) => eprintln!("Transaction failed: {:?}", e),
 
+    }
+
+    let mut tx2 = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        recent_blockhash,
+    );
+    println!("Trying to init transfer hook");
+    let result = banks_client.process_transaction(tx2).await;
+    match result {
+        Ok(()) => println!("Transfer Hook Init succeeded"),
+        Err(e) => eprintln!("Transfer Hook Init failed: {:?}", e),
     }
 
     let alice = Keypair::new();
@@ -183,7 +204,7 @@ async fn create_non_transfer_hook_ata() {
         &spl_token_2022::ID, // Allocate to the same program ID
     );
 
-    let ix = initialize_mint(
+    let ix = initialize_mint2(
         &spl_token_2022::ID,
         &mint.pubkey(),
         &payer.pubkey(),
