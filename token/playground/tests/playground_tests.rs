@@ -129,20 +129,59 @@ async fn create_transfer_hook_ata() {
         &spl_token_2022::ID,
     );
 
-    let mut create_ata_tx = Transaction::new_signed_with_payer(
+    let ata = get_associated_token_address_with_program_id(
+        &alice.pubkey(),
+        &mint.pubkey(),
+        &spl_token_2022::ID,
+    );
+
+
+    let create_ata_tx = Transaction::new_signed_with_payer(
         &[alice_create_ata_ix],
         Some(&payer.pubkey()),
         &[&payer],
         recent_blockhash,
     );
-
-
-
     let result = banks_client.process_transaction(create_ata_tx).await;
     match result {
         Ok(()) => println!("Create ATA Transaction succeeded"),
         Err(e) => eprintln!("Create ATA Transaction failed: {:?}", e),
     };
+
+    // Create some tokens for the mint authority
+    let auth_create_ata_ix = create_associated_token_account(
+        &payer.pubkey(),
+        &payer.pubkey(),
+        &mint.pubkey(),
+        &spl_token_2022::ID,
+    );
+
+    let auth_ata = get_associated_token_address_with_program_id(
+        &payer.pubkey(),
+        &mint.pubkey(),
+        &spl_token_2022::ID,
+    );
+    let mint_tokens = mint_to(
+        &spl_token_2022::ID,
+        &mint.pubkey(),
+        &auth_ata,
+        &payer.pubkey(),
+        &[],
+        100
+    ).unwrap();
+
+    let mint_tokens_tx = Transaction::new_signed_with_payer(
+        &[auth_create_ata_ix, mint_tokens],
+        Some(&payer.pubkey()),
+        &[&payer],
+        recent_blockhash,
+    );
+    let result = banks_client.process_transaction(mint_tokens_tx).await;
+    match result {
+        Ok(()) => println!("Minted 100 tokens to the mint authority"),
+        Err(e) => eprintln!("Mint Tokens Transaction failed: {:?}", e),
+    };
+
 
 }
 #[tokio::test]
@@ -234,7 +273,7 @@ async fn create_non_transfer_hook_ata() {
         &spl_token_2022::ID,
     );
 
-    let mut create_ata_tx = Transaction::new_signed_with_payer(
+    let  create_ata_tx = Transaction::new_signed_with_payer(
         &[alice_create_ata_ix],
         Some(&payer.pubkey()),
         &[&payer],
