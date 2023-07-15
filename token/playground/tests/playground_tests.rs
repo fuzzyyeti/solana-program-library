@@ -1,9 +1,4 @@
-use std::alloc::System;
-use std::cmp::min;
-use solana_program::bpf_loader_upgradeable::UpgradeableLoaderState::Buffer;
-use solana_program::program_option::COption;
 use solana_program::pubkey::Pubkey;
-use solana_program::program_pack::Pack;
 use solana_sdk::system_instruction::create_account;
 use solana_sdk::transaction::Transaction;
 use {
@@ -18,8 +13,8 @@ use {
 use solana_sdk::signature::{Keypair, Signer};
 use spl_token_2022::extension::ExtensionType;
 use spl_token_2022::state::Mint;
-use spl_associated_token_account::{instruction::create_associated_token_account, get_associated_token_address, get_associated_token_address_with_program_id};
-use spl_token_2022::extension::ExtensionType::ImmutableOwner;
+use spl_associated_token_account::{instruction::create_associated_token_account, get_associated_token_address_with_program_id};
+use spl_token_2022::instruction::{transfer_checked};
 
 
 #[tokio::test]
@@ -94,7 +89,7 @@ async fn create_transfer_hook_ata() {
     ).unwrap();
 
 
-    let mut tx = Transaction::new_signed_with_payer(
+    let tx = Transaction::new_signed_with_payer(
         &[create_account_instruction, transfer_hook_init_ix],
         Some(&payer.pubkey()),
         &[&mint, &payer],
@@ -107,7 +102,7 @@ async fn create_transfer_hook_ata() {
 
     }
 
-    let mut tx2 = Transaction::new_signed_with_payer(
+    let tx2 = Transaction::new_signed_with_payer(
         &[ix],
         Some(&payer.pubkey()),
         &[&payer],
@@ -182,6 +177,43 @@ async fn create_transfer_hook_ata() {
         Err(e) => eprintln!("Mint Tokens Transaction failed: {:?}", e),
     };
 
+    let mut transfer_ix = transfer_checked(
+        &spl_token_2022::ID,
+        &auth_ata,
+        &mint.pubkey(),
+        &ata,
+        &payer.pubkey(),
+        &[],
+        1,
+        9
+    ).unwrap();
+
+    transfer_ix.accounts.push(AccountMeta {
+        pubkey: transfer_hook_program_id,
+        is_signer: false,
+        is_writable: false,
+    });
+    for account_meta in account_metas {
+        transfer_ix.accounts.push(account_meta);
+    }
+    transfer_ix.accounts.push(AccountMeta {
+        pubkey: extra_accounts_address,
+        is_signer: false,
+        is_writable: false,
+    });
+
+    let transfer_tx = Transaction::new_signed_with_payer(
+        &[transfer_ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        recent_blockhash,
+    );
+    let result = banks_client.process_transaction(transfer_tx).await;
+    match result {
+        Ok(()) => println!("Transfer Transaction succeeded"),
+        Err(e) => eprintln!("Transfer Transaction failed: {:?}", e),
+    };
+
 
 }
 #[tokio::test]
@@ -251,7 +283,7 @@ async fn create_non_transfer_hook_ata() {
         9,
     ).unwrap();
 
-    let mut tx = Transaction::new_signed_with_payer(
+    let tx = Transaction::new_signed_with_payer(
         &[create_account_instruction, ix],
         Some(&payer.pubkey()),
         &[&mint, &payer],
