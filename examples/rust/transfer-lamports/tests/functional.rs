@@ -4,7 +4,7 @@ use {
         pubkey::Pubkey,
     },
     solana_program_test::*,
-    solana_sdk::{account::Account, signature::Signer, transaction::Transaction},
+    solana_sdk::{account::Account, signature::Signer, signature::Keypair, transaction::Transaction},
     spl_example_transfer_lamports::processor::process_instruction,
     std::str::FromStr,
 };
@@ -18,6 +18,14 @@ async fn test_lamport_transfer() {
         "spl_example_transfer_lamports",
         program_id,
         processor!(process_instruction),
+    );
+    let payer = Keypair::new();
+    program_test.add_account(
+        payer.pubkey(),
+        Account {
+            lamports: 1_000_000_000,
+            ..Account::default()
+        },
     );
     program_test.add_account(
         source_pubkey,
@@ -34,7 +42,7 @@ async fn test_lamport_transfer() {
             ..Account::default()
         },
     );
-    let (mut banks_client, payer, recent_blockhash) = program_test.start().await;
+    let (mut banks_client, _payer, recent_blockhash) = program_test.start().await;
 
     let mut transaction = Transaction::new_with_payer(
         &[Instruction::new_with_bincode(
